@@ -1,0 +1,11 @@
+/.vscode
+/Untitled-1.ipynb
+/__pycache__
+/best_model.pt
+/cmd.txt
+/last_model.pt
+/output
+/output_onnx
+/pretrained_models
+/testfiles
+/weights
