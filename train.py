@@ -136,6 +136,7 @@ def main():
     parser.add_argument('--data', required=True)
     parser.add_argument('--pretrained', required=False)
     parser.add_argument('--num_workers', default=5, type=int)
+    parser.add_argument('--lightweight', '-l', default=False, type=bool)
     args = parser.parse_args()
 
     # augmentation parameters
@@ -184,6 +185,14 @@ def main():
 
     print(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
 
+
+
+    if args.lightweight:
+        # pruning
+        # quantization
+        # fine-tuning
+        pass
+    
     with open('weights/test_results.txt', 'w+') as f:
         f.write(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
         f.close()
