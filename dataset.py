@@ -87,20 +87,30 @@ class Yolo_Dataset(Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        samples, cls, box, indices = zip(*batch)
+        
+        samples, cls, box, indices = [], [], [], []
+        for i, (sample, cl, bx, idx) in enumerate(batch):
+            samples.append(sample)
+            # Ensure cls is 2D
+            if cl.numel() == 0:
+                cl = torch.zeros((0, 1), dtype=torch.float32)
+            elif cl.dim() == 1:
+                cl = cl.view(-1, 1)
+            elif cl.dim() > 2:
+                cl = cl.squeeze().view(-1, 1)
+            cls.append(cl)
+            box.append(bx)
+            # Update indices to reflect batch position
+            idx = torch.full((cl.shape[0],), i, dtype=torch.int64)
+            indices.append(idx)
 
-        cls = torch.cat(cls, dim=0)
-        box = torch.cat(box, dim=0)
+        samples = torch.stack(samples, dim=0).float()
+        cls = torch.cat(cls, dim=0) if cls else torch.zeros((0, 1), dtype=torch.float32)
+        box = torch.cat(box, dim=0) if box else torch.zeros((0, 4), dtype=torch.float32)
+        indices = torch.cat(indices, dim=0) if indices else torch.zeros((0,), dtype=torch.int64)
 
-        new_indices = list(indices)
-        for i in range(len(indices)):
-            new_indices[i] += i
-        indices = torch.cat(new_indices, dim=0)
-
-        targets = {'cls': cls,
-                   'box': box,
-                   'idx': indices}
-        return torch.stack(samples, dim=0).float(), targets
+        targets = {'cls': cls, 'box': box, 'idx': indices}
+        return samples, targets
 
     @staticmethod
     def load_label(filenames):

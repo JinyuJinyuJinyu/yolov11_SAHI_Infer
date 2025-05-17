@@ -53,7 +53,7 @@ def train(model, optimizer, train_loader, valdataloader, scheduler ,device, epoc
         print(f"Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
         mean_ap, map50, m_rec, m_pre = evaluate(model, valdataloader, loss_fn, device)  # Evaluate after each epoch
-        val_metric.append({'mean_ap': mean_ap, 'map50': map50, 'm_rec': m_rec, 'm_pre': m_pre})
+        val_metric.append({'train_avg_loss': avg_loss, 'mean_ap': mean_ap, 'map50': map50, 'm_rec': m_rec, 'm_pre': m_pre})
         if mean_ap > best_map:
             best_map = mean_ap
             best_model = deepcopy(model.state_dict()) # Save the best model
