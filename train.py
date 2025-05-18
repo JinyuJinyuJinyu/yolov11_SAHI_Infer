@@ -131,11 +131,11 @@ def get_image_data(dir):
 def main():
     parser = ArgumentParser()
     parser.add_argument('--input-size', default=640, type=int)
-    parser.add_argument('--batch_size', default=32, type=int)
+    parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--data', required=True)
     parser.add_argument('--pretrained', required=False)
-    parser.add_argument('--num_workers', default=5, type=int)
+    parser.add_argument('--num_workers', default=8, type=int)
     parser.add_argument('--lightweight', '-l', default=False, type=bool)
     args = parser.parse_args()
 

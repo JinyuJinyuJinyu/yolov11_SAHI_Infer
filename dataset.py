@@ -9,6 +9,14 @@ from PIL import Image
 import albumentations as A
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+
+
+from concurrent.futures import ThreadPoolExecutor
+import torch.multiprocessing as mp
+from multiprocessing import Pool, cpu_count
+from functools import partial
+import numpy as np
+
 FORMATS = 'bmp', 'dng', 'jpeg', 'jpg', 'mpo', 'png', 'tif', 'tiff'
 
 class Yolo_Dataset(Dataset):
@@ -111,45 +119,76 @@ class Yolo_Dataset(Dataset):
 
         targets = {'cls': cls, 'box': box, 'idx': indices}
         return samples, targets
+    @staticmethod
+    def _process_label(filename, formats=FORMATS):
+        """Helper function to process a single file's label."""
+        try:
+            # Verify images
+            # with open(filename, 'rb') as f:
+            #     image = Image.open(f)
+            #     image.verify()  # PIL verify
+            # shape = image.size  # image size
+            # if not ((shape[0] > 9) and (shape[1] > 9)):
+            #     print(f"Image size {shape} <10 pixels for {filename}")
+            #     return filename, np.zeros((0, 5), dtype=np.float32)
+            # if image.format.lower() not in formats:
+            #     print(f"Invalid image format {image.format} for {filename}")
+            #     return filename, np.zeros((0, 5), dtype=np.float32)
 
+            # Verify labels
+            a = f'{os.sep}images{os.sep}'
+            b = f'{os.sep}labels{os.sep}'
+            label_file = b.join(filename.rsplit(a, 1)).rsplit('.', 1)[0] + '.txt'
+            if os.path.isfile(label_file):
+                with open(label_file) as f:
+                    label = [x.split() for x in f.read().strip().splitlines() if len(x)]
+                    label = np.array(label, dtype=np.float32)
+                nl = len(label)
+                if nl:
+                    if not (label >= 0).all():
+                        print(f"Negative values in label for {filename}")
+                        return filename, np.zeros((0, 5), dtype=np.float32)
+                    if label.shape[1] != 5:
+                        print(f"Invalid label shape {label.shape} for {filename}")
+                        return filename, np.zeros((0, 5), dtype=np.float32)
+                    if not (label[:, 1:] <= 1).all():
+                        print(f"Label values > 1 for {filename}")
+                        return filename, np.zeros((0, 5), dtype=np.float32)
+                    _, i = np.unique(label, axis=0, return_index=True)
+                    if len(i) < nl:  # duplicate row check
+                        label = label[i]  # remove duplicates
+                else:
+                    label = np.zeros((0, 5), dtype=np.float32)
+            else:
+                label = np.zeros((0, 5), dtype=np.float32)
+            return filename, label
+        except FileNotFoundError:
+            print(f"File not found: {filename}")
+            return filename, np.zeros((0, 5), dtype=np.float32)
+        except Exception as e:
+            print(f"Error processing {filename}: {str(e)}")
+            return filename, np.zeros((0, 5), dtype=np.float32)
+        
     @staticmethod
     def load_label(filenames):
-        x = {}
-        for filename in tqdm(filenames):
-            try:
-                # verify images
-                with open(filename, 'rb') as f:
-                    image = Image.open(f)
-                    image.verify()  # PIL verify
-                shape = image.size  # image size
-                assert (shape[0] > 9) & (shape[1] > 9), f'image size {shape} <10 pixels'
-                assert image.format.lower() in FORMATS, f'invalid image format {image.format}'
+        """Load labels using multi-processing."""
+        # Determine number of processes (use min of CPU count and number of files)
+        num_processes = min(int(2/3*cpu_count()), len(filenames), 16)  # Cap at 16 to avoid overhead
+        print(f"Using {num_processes} processes for label loading")
 
-                # verify labels
-                a = f'{os.sep}images{os.sep}'
-                b = f'{os.sep}labels{os.sep}'
-                if os.path.isfile(b.join(filename.rsplit(a, 1)).rsplit('.', 1)[0] + '.txt'):
-                    with open(b.join(filename.rsplit(a, 1)).rsplit('.', 1)[0] + '.txt') as f:
-                        label = [x.split() for x in f.read().strip().splitlines() if len(x)]
-                        label = numpy.array(label, dtype=numpy.float32)
-                    nl = len(label)
-                    if nl:
-                        assert (label >= 0).all()
-                        assert label.shape[1] == 5
-                        assert (label[:, 1:] <= 1).all()
-                        _, i = numpy.unique(label, axis=0, return_index=True)
-                        if len(i) < nl:  # duplicate row check
-                            label = label[i]  # remove duplicates
-                    else:
-                        label = numpy.zeros((0, 5), dtype=numpy.float32)
-                else:
-                    label = numpy.zeros((0, 5), dtype=numpy.float32)
-            except FileNotFoundError:
-                label = numpy.zeros((0, 5), dtype=numpy.float32)
-            except AssertionError:
-                continue
+        # Create a partial function with formats
+        process_func = partial(Yolo_Dataset._process_label, formats=FORMATS)
+
+        # Use Pool for multi-processing
+        x = {}
+        with Pool(processes=num_processes) as pool:
+            # Map the processing function to filenames with progress bar
+            results = list(tqdm(pool.imap(process_func, filenames), total=len(filenames), desc="Loading labels"))
+        
+        # Collect results into dictionary
+        for filename, label in results:
             x[filename] = label
-        # torch.save(x, path)
+
         return x
 
 
@@ -257,7 +296,8 @@ if __name__ == "__main__":
     # hsv_s: 0.7
     # hsv_v: 0.4 wrt ultralytics
 
-    dataset = Yolo_Dataset(filenames=glob('/mnt/DATA/DATASETS/data/dlpj/slp/test/images/*.jpg'), input_size=640, params={'flip_ud': 0.5, 'flip_lr': 0.5, 'hsv_h': 0.015, 'hsv_s': 0.7, 'hsv_v': 0.4}, augment=True)
+    dataset = Yolo_Dataset(filenames=glob('/mnt/DATA/DATASETS/data/dlpj/slp_sahi1280/sahi_test_data/train/images/*.jpg'), input_size=640, params={'flip_ud': 0.5, 'flip_lr': 0.5, 'hsv_h': 0.015, 'hsv_s': 0.7, 'hsv_v': 0.4}, augment=True)
+    print(len(dataset))
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=dataset.collate_fn)
 
     for images, targets in dataloader:
