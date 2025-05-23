@@ -11,7 +11,7 @@ from copy import deepcopy
 import yaml
 import os
 import pandas as pd
-
+import torch.nn.utils.prune as prune
 
 torch.manual_seed(0)
 # finish training loop and train.py file, args. 
@@ -21,6 +21,7 @@ torch.manual_seed(0)
 # train file sahi, slice large images
 
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
 
 def train(model, optimizer, train_loader, valdataloader, scheduler ,device, epochs, loss_fn):
     val_metric = []
@@ -59,11 +60,11 @@ def train(model, optimizer, train_loader, valdataloader, scheduler ,device, epoc
             best_model = deepcopy(model.state_dict()) # Save the best model
             print(f"Best model updated with mean mAP: {best_map:.4f}")
             torch.save(best_model, 'weights/best_model.pt')
-            
-
-    torch.save(deepcopy(model.state_dict()), 'weights/last_model.pt')
-    pd.DataFrame.from_dict(val_metric).to_csv('weights/val_metric.csv')
     print("Training completed!")
+    return model.state_dict(), pd.DataFrame.from_dict(val_metric)
+    # torch.save(deepcopy(model.state_dict()), 'weights/last_model.pt')
+    # pd.DataFrame.from_dict(val_metric).to_csv('weights/val_metric.csv')
+
 
 def evaluate(model, data_loader, loss_fn, device):
     # eval and test the model
@@ -128,15 +129,34 @@ def get_image_data(dir):
         image_files.extend(glob(os.path.join(dir, ext)))
     return image_files
 
+
+def prune_model(model, amount=0.2):
+    model.eval()
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.Linear):
+            prune.l1_unstructured(module, name='weight', amount=amount)
+            prune.remove(module, 'weight')
+    print(f"Model pruned with amount={amount}.")
+    return model
+
+def quantize_model(model):
+    model.eval()
+    quantized_model = torch.quantization.quantize_dynamic(
+        model, {torch.nn.Conv2d, torch.nn.Linear}, dtype=torch.qint8
+    )
+    print("Model quantized successfully.")
+    return quantized_model
+
 def main():
     parser = ArgumentParser()
     parser.add_argument('--input-size', default=640, type=int)
-    parser.add_argument('--batch_size', default=16, type=int)
+    parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--data', required=True)
     parser.add_argument('--pretrained', required=False)
     parser.add_argument('--num_workers', default=8, type=int)
-    parser.add_argument('--lightweight', '-l', default=False, type=bool)
+    parser.add_argument('--lightweight', '-l', action='store_true', default=False)
+    parser.add_argument('--skip_train', '-st', action='store_true', default=False)
     args = parser.parse_args()
 
     # augmentation parameters
@@ -174,28 +194,47 @@ def main():
     testdataloader = DataLoader(testdataset, batch_size=args.batch_size*2, shuffle=True, num_workers=args.num_workers, collate_fn=testdataset.collate_fn)
     print("Dataset loaded successfully.")
     
-    print("Starting training process...")
-    train(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.epochs, loss_fn=loss_fn)
+    if not args.skip_train:
+        print("Starting training process...")
+        train(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.epochs, loss_fn=loss_fn)
 
-    print("Training process completed.")    
+        print("Training process completed.")    
 
-    print('testing model')
-    
-    mean_ap, map50, m_rec, m_pre = evaluate(model, testdataloader, loss_fn, DEVICE)
+        print('testing model')
+        
+        mean_ap, map50, m_rec, m_pre = evaluate(model, testdataloader, loss_fn, DEVICE)
+        with open('weights/test_results.txt', 'w+') as f:
+            f.write(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
+            f.close()
 
-    print(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
+        print(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
 
 
 
     if args.lightweight:
-        # pruning
-        # quantization
-        # fine-tuning
-        pass
-    
-    with open('weights/test_results.txt', 'w+') as f:
-        f.write(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
-        f.close()
+
+        assert os.path.exists('weights/best_model.pt'), "No pretrained model found. Please train the model first."
+
+        model.load_state_dict(torch.load('weights/best_model.pt', map_location=DEVICE))
+
+        model = prune_model(model, amount=0.2)
+        model = quantize_model(model)  # Uncomment if you want to quantize the model
+
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        CosineAnnealingLR = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=0.0001)
+
+        train(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.epochs, loss_fn=loss_fn)
+        mean_ap, map50, m_rec, m_pre = evaluate(model, testdataloader, loss_fn, DEVICE)
+        print(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
+
+        with open('weights/pruned_quantized_test_results.txt', 'w+') as f:
+            f.write(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
+            f.close()
+        # Save the pruned and quantized model
+        torch.save(model.state_dict(), 'weights/pruned_quantized_model.pt')
+
+
+
 
 if __name__ == "__main__":
     main()
