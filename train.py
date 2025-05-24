@@ -29,7 +29,7 @@ def train(model, optimizer, train_loader, valdataloader, scheduler ,device, epoc
     best_map = -1
 
     print("Training the model...")
-    model.train()
+
     amp_scale = torch.amp.GradScaler()
     for epoch in range(epochs):
         model.train()
@@ -60,10 +60,79 @@ def train(model, optimizer, train_loader, valdataloader, scheduler ,device, epoc
             best_model = deepcopy(model.state_dict()) # Save the best model
             print(f"Best model updated with mean mAP: {best_map:.4f}")
             torch.save(best_model, 'weights/best_model.pt')
+
+    torch.save(deepcopy(model.state_dict()), 'weights/last_model.pt')
     print("Training completed!")
     return model.state_dict(), pd.DataFrame.from_dict(val_metric)
-    # torch.save(deepcopy(model.state_dict()), 'weights/last_model.pt')
-    # pd.DataFrame.from_dict(val_metric).to_csv('weights/val_metric.csv')
+
+
+
+def train_qt(model, optimizer, train_loader, valdataloader, scheduler ,device, epochs, loss_fn):
+    val_metric = []
+    best_model = None
+    best_map = -1
+
+    print("QTA Training the model...")
+
+    amp_scale = torch.amp.GradScaler()
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0.0
+        for imgs, targets in tqdm(train_loader, desc=f"QAT Epoch {epoch+1}/{epochs} (Train)"):
+            imgs, targets = imgs.to(DEVICE), targets
+            
+            optimizer.zero_grad()
+            with torch.amp.autocast(device_type='cuda'):
+                predictions = model(imgs)
+                loss_box, loss_cls, loss_dfl = loss_fn(predictions, targets)
+                total_loss = loss_box + loss_cls + loss_dfl  # Sum the loss components
+
+            amp_scale.scale(total_loss).backward()
+            amp_scale.step(optimizer)
+            amp_scale.update()
+            train_loss += total_loss.item()
+            
+        scheduler.step()
+        avg_loss = train_loss / len(train_loader)
+        print(f"Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
+
+        mean_ap, map50, m_rec, m_pre = evaluate(model, valdataloader, loss_fn, device)  # Evaluate after each epoch
+        val_metric.append({'train_avg_loss': avg_loss, 'mean_ap': mean_ap, 'map50': map50, 'm_rec': m_rec, 'm_pre': m_pre})
+        if mean_ap > best_map:
+            best_map = mean_ap
+            best_model = deepcopy(model.state_dict()) # Save the best model
+            print(f"Best model updated with mean mAP: {best_map:.4f}")
+            torch.save(best_model, 'weights/train_qt_best_model.pt')
+
+    print("QAT Training completed!")
+    # Save the last model state
+    torch.save(deepcopy(model.state_dict()), 'weights/trainqt_last_model.pt')
+    # Convert to quantized model (first quantization step)
+    model.load_state_dict(best_model)
+    model.eval()
+    quantized_model = torch.quantization.convert(model, inplace=False)
+    print("Model converted to quantized format (qint8) after QAT.")
+
+    # Additional post-training quantization step
+    quantized_model.eval()
+    # quantized_model.qconfig = torch.quantization.get_default_qconfig('qnnpack')  # Re-apply quantization config, eror here , to be fixed
+    torch.quantization.prepare(quantized_model, inplace=True)
+    print("Applying post-training quantization calibration...")
+    
+    # Calibrate with a few batches from the training data
+    with torch.no_grad():
+        for imgs, _ in train_loader:
+            imgs = imgs.to(device)
+            quantized_model(imgs)
+            break  # Calibrate with one batch for simplicity
+
+    # Final quantization
+    final_quantized_model = torch.quantization.convert(quantized_model, inplace=False)
+    print("Model re-quantized successfully (post-training quantization).")
+
+    torch.save(deepcopy(final_quantized_model.state_dict()), 'weights/trainqt_best_model.pt')
+
+    return final_quantized_model.state_dict(), pd.DataFrame.from_dict(val_metric)
 
 
 def evaluate(model, data_loader, loss_fn, device):
@@ -130,15 +199,6 @@ def get_image_data(dir):
     return image_files
 
 
-def prune_model(model, amount=0.2):
-    model.eval()
-    for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.Linear):
-            prune.l1_unstructured(module, name='weight', amount=amount)
-            prune.remove(module, 'weight')
-    print(f"Model pruned with amount={amount}.")
-    return model
-
 def quantize_model(model):
     model.eval()
     quantized_model = torch.quantization.quantize_dynamic(
@@ -152,6 +212,7 @@ def main():
     parser.add_argument('--input-size', default=640, type=int)
     parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--epochs', default=100, type=int)
+    parser.add_argument('--finetuneepoch',default=20, type=int)
     parser.add_argument('--data', required=True)
     parser.add_argument('--pretrained', required=False)
     parser.add_argument('--num_workers', default=8, type=int)
@@ -174,7 +235,7 @@ def main():
 
     model.to(DEVICE)
     # optim, scheduler, lossfn
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     CosineAnnealingLR = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=0.0001)
     loss_fn = ComputeLoss(model)
 
@@ -196,12 +257,12 @@ def main():
     
     if not args.skip_train:
         print("Starting training process...")
-        train(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.epochs, loss_fn=loss_fn)
-
+        model_state_dict, train_val_metric = train(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.epochs, loss_fn=loss_fn)
+        train_val_metric.to_csv('weights/train_val_metric.csv', index=False)
         print("Training process completed.")    
 
         print('testing model')
-        
+        model.load_state_dict(model_state_dict)
         mean_ap, map50, m_rec, m_pre = evaluate(model, testdataloader, loss_fn, DEVICE)
         with open('weights/test_results.txt', 'w+') as f:
             f.write(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
@@ -210,30 +271,31 @@ def main():
         print(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
 
 
-
     if args.lightweight:
 
         assert os.path.exists('weights/best_model.pt'), "No pretrained model found. Please train the model first."
 
         model.load_state_dict(torch.load('weights/best_model.pt', map_location=DEVICE))
 
-        model = prune_model(model, amount=0.2)
-        model = quantize_model(model)  # Uncomment if you want to quantize the model
+        model = quantize_model(model)  
+
+        mean_ap, map50, m_rec, m_pre = evaluate(model, testdataloader, loss_fn, DEVICE)
+        print(f"Before QTA train tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
         CosineAnnealingLR = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=0.0001)
 
-        train(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.epochs, loss_fn=loss_fn)
+        final_quantized_model_state_dict, train_qt_val_metric = train_qt(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.finetuneepoch, loss_fn=loss_fn)
+        train_qt_val_metric.to_csv('weights/train_qt_val_metric.csv', index=False)
+        model.load_state_dict(final_quantized_model_state_dict)
         mean_ap, map50, m_rec, m_pre = evaluate(model, testdataloader, loss_fn, DEVICE)
-        print(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
+        print(f"QTA train tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
 
         with open('weights/pruned_quantized_test_results.txt', 'w+') as f:
             f.write(f"tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
             f.close()
         # Save the pruned and quantized model
         torch.save(model.state_dict(), 'weights/pruned_quantized_model.pt')
-
-
 
 
 if __name__ == "__main__":
