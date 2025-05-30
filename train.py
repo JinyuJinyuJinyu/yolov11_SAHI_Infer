@@ -92,8 +92,8 @@ def train_qt(model, optimizer, train_loader, valdataloader, scheduler ,device, e
             amp_scale.update()
             train_loss += total_loss.item()
             
-        scheduler.step()
         avg_loss = train_loss / len(train_loader)
+        scheduler.step(avg_loss)
         print(f"Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
         mean_ap, map50, m_rec, m_pre = evaluate(model, valdataloader, loss_fn, device)  # Evaluate after each epoch
@@ -283,9 +283,9 @@ def main():
         print(f"Before QTA train tese results: mAP: {mean_ap:.4f}, mAP50: {map50:.4f}, m_rec: {m_rec:.4f}, m_pre: {m_pre:.4f}")
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-        CosineAnnealingLR = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=0.0001)
+        ReduceLROnPlateau = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
 
-        final_quantized_model_state_dict, train_qt_val_metric = train_qt(model, optimizer, train_dataloader, valdataloader, CosineAnnealingLR, DEVICE, epochs=args.finetuneepoch, loss_fn=loss_fn)
+        final_quantized_model_state_dict, train_qt_val_metric = train_qt(model, optimizer, train_dataloader, valdataloader, ReduceLROnPlateau, DEVICE, epochs=args.finetuneepoch, loss_fn=loss_fn)
         train_qt_val_metric.to_csv('weights/train_qt_val_metric.csv', index=False)
         model.load_state_dict(final_quantized_model_state_dict)
         mean_ap, map50, m_rec, m_pre = evaluate(model, testdataloader, loss_fn, DEVICE)

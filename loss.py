@@ -269,7 +269,7 @@ class ComputeLoss:
                                                target_bboxes,
                                                target_scores,
                                                target_scores_sum, fg_mask)
-
+        # wrf to ultralytics
         loss_box *= 7.5  # box gain
         loss_cls *= 0.5  # cls gain
         loss_dfl *= 1.5  # dfl gain
