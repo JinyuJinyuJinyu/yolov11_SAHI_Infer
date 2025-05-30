@@ -40,7 +40,7 @@ This project implements a YOLOv11-based object detection system optimized for de
 Select a video (.mp4, .avi, .mov) and ONNX model.
 Adjust confidence and IoU thresholds via sliders.
 Start/stop detection to visualize bounding boxes and track defect counts.
-Displays estimated repair cost ($100 per detection).
+Displays estimated repair cost.
 
 ## Dataset Preparation
 YAML File: Create data.yaml
