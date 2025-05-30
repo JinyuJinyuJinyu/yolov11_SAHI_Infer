@@ -9,7 +9,7 @@ This project implements a YOLOv11-based object detection system optimized for de
 - **Quantization**: Supports dynamic quantization and quantization-aware training (QAT) for optimized inference.
 - **GUI**: Real-time video inference with bounding box visualization, detection counts, and estimated repair costs. Accept any input dimension: for input dimension larger than 640X640, inferece process adopts sahi method. Input dimension smaller than 640X640, input stream will resized to 640X640 for inference.
 - **ONNX Export**: Converts trained PyTorch models to ONNX for deployment.
-    ```
+    
     python pt2onnx.py --model weights/best_model.pt --input_size 640 --nc 3
 
 ## Project Structure
@@ -22,7 +22,7 @@ This project implements a YOLOv11-based object detection system optimized for de
 - `slice_coco.py`: Slices large images and COCO annotations using SAHI.
 - `GUI.py`: Tkinter-based GUI for real-time video inference.
 ## Training
-    ```
+    
     python train.py --data data.yaml --input-size 640 --batch_size 32 --epochs 100 --num_workers 8 --pretrained weights/pretrained.pt
 
 --data: Path to YAML file with dataset paths and class info.
@@ -34,7 +34,7 @@ This project implements a YOLOv11-based object detection system optimized for de
 --lightweight: Enable quantization and pruning.
 --skip_train: Skip training for evaluation/quantization.
 ## GUI for Inference
-    ```
+    
     python GUI.py
 
 Select a video (.mp4, .avi, .mov) and ONNX model.
@@ -51,12 +51,12 @@ YAML File: Create data.yaml
     names: ['hot_spot', 'low_temp', 'short_circuit']""
 
 Large Images: Slice high-resolution images with slice_coco.py:
-    ```
+    
     python slice_coco.py
 
 ## Installation
 1. Clone the repository:
-   ```
+   
    git clone https://github.com/JinyuJinyuJinyu/yolov11_scratch.git
    cd yolov11_scratch
 
