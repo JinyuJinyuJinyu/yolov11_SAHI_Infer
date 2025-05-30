@@ -10,7 +10,7 @@ This project implements a YOLOv11-based object detection system optimized for de
 - **GUI**: Real-time video inference with bounding box visualization, detection counts, and estimated repair costs. Accept any input dimension: for input dimension larger than 640X640, inferece process adopts sahi method. Input dimension smaller than 640X640, input stream will resized to 640X640 for inference.
 - **ONNX Export**: Converts trained PyTorch models to ONNX for deployment.
     ```bash
-    - python pt2onnx.py --model weights/best_model.pt --input_size 640 --nc 3
+    python pt2onnx.py --model weights/best_model.pt --input_size 640 --nc 3
 
 ## Project Structure
 - `dataset.py`: Loads and preprocesses YOLO-format datasets with augmentation.
@@ -23,7 +23,7 @@ This project implements a YOLOv11-based object detection system optimized for de
 - `GUI.py`: Tkinter-based GUI for real-time video inference.
 ## Training
     ```bash
-    - eg: python train.py --data data.yaml --input-size 640 --batch_size 32 --epochs 100 --num_workers 8 --pretrained weights/pretrained.pt
+    python train.py --data data.yaml --input-size 640 --batch_size 32 --epochs 100 --num_workers 8 --pretrained weights/pretrained.pt
 
 --data: Path to YAML file with dataset paths and class info.
 --input-size: Image size (default: 640).
