@@ -25,14 +25,14 @@ This project implements a YOLOv11-based object detection system optimized for de
     
     python train.py --data data.yaml --input-size 640 --batch_size 32 --epochs 100 --num_workers 8 --pretrained weights/pretrained.pt
 
---data: Path to YAML file with dataset paths and class info. 
---input-size: Image size (default: 640). 
---batch_size: Training batch size. 
---epochs: Number of epochs. 
---num_workers: Data loader workers. 
---pretrained: Path to pretrained model (optional). 
---lightweight: Enable quantization and pruning. 
---skip_train: Skip training for evaluation/quantization. 
+--data: Path to YAML file with dataset paths and class info.\ 
+--input-size: Image size (default: 640).\ 
+--batch_size: Training batch size.\ 
+--epochs: Number of epochs.\ 
+--num_workers: Data loader workers.\ 
+--pretrained: Path to pretrained model (optional).\ 
+--lightweight: Enable quantization and pruning.\ 
+--skip_train: Skip training for evaluation/quantization.\ 
 ## GUI for Inference
     
     python GUI.py
