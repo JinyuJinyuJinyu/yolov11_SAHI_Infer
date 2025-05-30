@@ -43,12 +43,12 @@ Start/stop detection to visualize bounding boxes and track defect counts.
 Displays estimated repair cost.
 
 ## Dataset Preparation
-YAML File: Create data.yaml
-""  train: /path/to/train/images
-    val: /path/to/val/images
-    test: /path/to/test/images
-    nc: 3
-    names: ['hot_spot', 'low_temp', 'short_circuit']""
+YAML File: Create data.yaml /
+""  train: /path/to/train/images/
+    val: /path/to/val/images/
+    test: /path/to/test/images/
+    nc: 3/
+    names: ['hot_spot', 'low_temp', 'short_circuit']""/
 
 Large Images: Slice high-resolution images with slice_coco.py:
     
