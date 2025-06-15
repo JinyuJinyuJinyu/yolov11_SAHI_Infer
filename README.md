@@ -41,7 +41,7 @@ Select a video (.mp4, .avi, .mov) and ONNX model.
 Adjust confidence and IoU thresholds via sliders.
 Start/stop detection to visualize bounding boxes and track defect counts.
 Displays estimated repair cost.
-![My Image](yolov11_scratch/app_demo.png)
+![My Image](app_demo.png)
 
 ## Dataset Preparation
 YAML File: Create data.yaml 
