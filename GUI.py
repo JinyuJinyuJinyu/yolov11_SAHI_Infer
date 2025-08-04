@@ -10,6 +10,7 @@ from sahi.slicing import slice_image
 import torch
 from util import non_max_suppression
 import torchvision
+import csv
 
 # Define class names 
 CLASS_NAMES = ['hot_spot', 'low_temp', 'short_circuit']
@@ -34,6 +35,9 @@ class YOLOApp:
         self.iou_thres = tk.DoubleVar(value=0.5)    # Default IoU threshold
         self.detection_counts = {name: 0 for name in CLASS_NAMES}  # Track detection counts
         self.total_detections = 0
+        self.detection_results = []  # Store detection results for saving
+        self.frame_count = 0  # Track frame number
+        self.inference_times = []  # Track inference times for FPS calculation
 
         # GUI Components
         self.create_widgets()
@@ -75,13 +79,19 @@ class YOLOApp:
         self.start_btn = tk.Button(self.left_frame, text="Start Detection", command=self.toggle_detection)
         self.start_btn.pack(pady=5)
 
+        # Save results button
+        self.save_btn = tk.Button(self.left_frame, text="Save Results", command=self.save_results)
+        self.save_btn.pack(pady=5)
+
         # Video display
         self.canvas = tk.Canvas(self.left_frame, width=960, height=540)
         self.canvas.pack(pady=5)
 
-        # Status label
-        self.status = tk.Label(self.left_frame, text="Status: Idle")
-        self.status.pack(pady=5)
+        # Status frame
+        self.status_frame = tk.Frame(self.left_frame)
+        self.status_frame.pack(pady=5)
+        self.status = tk.Label(self.status_frame, text="Status: Idle")
+        self.status.pack(anchor=tk.W, padx=5, pady=2)
 
         # Right frame for sub-windows
         self.right_frame = tk.Frame(self.main_frame)
@@ -119,7 +129,7 @@ class YOLOApp:
         )
         if self.video_path:
             self.status.config(text=f"Status: Video selected - {self.video_path.split('/')[-1]}")
-            # Reset detection counts when a new video is selected
+            # Reset detection counts and results when a new video is selected
             self.reset_counts()
 
     def select_model(self):
@@ -135,27 +145,61 @@ class YOLOApp:
                 messagebox.showerror("Error", f"Failed to load model: {str(e)}")
 
     def reset_counts(self):
-        """Reset detection counts and update GUI."""
+        """Reset detection counts, results, and inference times."""
         self.detection_counts = {name: 0 for name in CLASS_NAMES}
         self.total_detections = 0
+        self.detection_results = []
+        self.frame_count = 0
+        self.inference_times = []
         for cls in CLASS_NAMES:
             self.count_labels[cls].config(text=f"{cls}: 0")
         self.total_label.config(text="Total Detections: 0")
         self.cost_label.config(text="Estimated Repair Cost: $0")
 
-    def update_counts(self, detections):
-        """Update detection counts and GUI based on new detections."""
+    def update_counts(self, detections, frame_number):
+        """Update detection counts and store results."""
         for det in detections:
             cls = int(det[5])
             cls_name = CLASS_NAMES[cls]
             self.detection_counts[cls_name] += 1
             self.total_detections += 1
+            # Store detection results
+            self.detection_results.append({
+                'frame_number': frame_number,
+                'class': cls_name,
+                'confidence': float(det[4]),
+                'x1': float(det[0]),
+                'y1': float(det[1]),
+                'x2': float(det[2]),
+                'y2': float(det[3])
+            })
         
         # Update GUI labels
         for cls in CLASS_NAMES:
             self.count_labels[cls].config(text=f"{cls}: {self.detection_counts[cls]}")
         self.total_label.config(text=f"Total Detections: {self.total_detections}")
         self.cost_label.config(text=f"Estimated Repair Cost: ${self.total_detections * 100}")
+
+    def save_results(self):
+        """Save detection results to a CSV file."""
+        if not self.detection_results:
+            messagebox.showwarning("Warning", "No detection results to save!")
+            return
+        
+        output_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")]
+        )
+        if output_path:
+            try:
+                with open(output_path, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=['frame_number', 'class', 'confidence', 'x1', 'y1', 'x2', 'y2'])
+                    writer.writeheader()
+                    for result in self.detection_results:
+                        writer.writerow(result)
+                messagebox.showinfo("Success", f"Results saved to {output_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save results: {str(e)}")
 
     def preprocess_image(self, image, resize_to_640=False):
         """Preprocess image to match Yolo_Dataset pipeline."""
@@ -204,6 +248,7 @@ class YOLOApp:
         """Run inference on an image, using SAHI for large images or resizing for small ones."""
         h, w = image.shape[:2]
         
+        start_time = time.time()
         if h > self.input_size or w > self.input_size:
             slice_result = slice_image(
                 image=image,
@@ -234,13 +279,15 @@ class YOLOApp:
                 all_detections = all_detections[indices]
             else:
                 all_detections = torch.zeros((0, 6), device='cuda' if torch.cuda.is_available() else 'cpu')
-            
-            return all_detections
         else:
-            return self.predict_onnx_single_img(image)
+            all_detections = self.predict_onnx_single_img(image)
+        
+        inference_time = time.time() - start_time
+        self.inference_times.append(inference_time)
+        return all_detections
 
-    def draw_detections(self, image, detections):
-        """Draw bounding boxes, confidence scores, and class labels on the image."""
+    def draw_detections(self, image, detections, ais, cis=-1):
+        """Draw bounding boxes, confidence scores, class labels, and FPS on the image."""
         image = image.copy()
         for det in detections:
             x1, y1, x2, y2, conf, cls = det
@@ -250,16 +297,20 @@ class YOLOApp:
             label = f"{CLASS_NAMES[cls]} {conf:.2f}"
             cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
             cv2.putText(image, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+        
+        # Draw FPS in the upper-left corner
+        fps_text = f"avg_infer_speed: {ais:.2f}, current_infer_speed: {cis:.2f}"
+        cv2.putText(image, fps_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         return image
 
     def process_video(self):
         if not self.video_path or not self.model:
-            messagebox.showwarning("Warning", "Please select video and model first!")
+            self.root.after(0, lambda: messagebox.showwarning("Warning", "Please select video and model first!"))
             return
         
         cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
-            messagebox.showerror("Error", "Failed to open video!")
+            self.root.after(0, lambda: messagebox.showerror("Error", "Failed to open video!"))
             return
         
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
@@ -270,11 +321,18 @@ class YOLOApp:
             if not ret:
                 break
             
+            self.frame_count += 1
             detections = self.predict_onnx(frame)
             
+            # Calculate FPS
+            avg_is = sum(self.inference_times)/len(self.inference_times) if self.inference_times else 0.0
+            
             if detections.shape[0] > 0:
-                frame = self.draw_detections(frame, detections)
-                self.update_counts(detections)
+                frame = self.draw_detections(frame, detections, avg_is, self.inference_times[-1])
+                self.root.after(0, lambda det=detections, fn=self.frame_count: self.update_counts(det, fn))
+            else:
+                # Draw FPS even if no detections
+                frame = self.draw_detections(frame, detections, avg_is,self.inference_times[-1])
             
             h, w = frame.shape[:2]
             r = min(960 / w, 540 / h)
@@ -285,16 +343,15 @@ class YOLOApp:
             img = Image.fromarray(img)
             img = ImageTk.PhotoImage(img)
             
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=img)
+            self.root.after(0, lambda i=img: self.canvas.create_image(0, 0, anchor=tk.NW, image=i))
             self.canvas.image = img
             
-            self.root.update()
             time.sleep(delay)
         
         cap.release()
         self.running = False
-        self.start_btn.config(text="Start Detection")
-        self.status.config(text="Status: Idle")
+        self.root.after(0, lambda: self.start_btn.config(text="Start Detection"))
+        self.root.after(0, lambda: self.status.config(text="Status: Idle"))
 
     def toggle_detection(self):
         if not self.running:
