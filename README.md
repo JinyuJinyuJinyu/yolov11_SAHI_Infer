@@ -11,7 +11,7 @@ This project implements a YOLOv11-based object detection system optimized for de
 - **ONNX Export**: Converts trained PyTorch models to ONNX for deployment.
     
     python pt2onnx.py --model weights/best_model.pt --input_size 640 --nc 3
-
+![My Image](flowchart.png)
 ## Project Structure
 - `dataset.py`: Loads and preprocesses YOLO-format datasets with augmentation.\
 - `networks.py`: Defines YOLOv11 architecture (`yolo_v11_n`, `t`, `s`, `m`, `l`, `x`).
